@@ -2,27 +2,25 @@
   "An embedded ldap server for unit testing"
   (:require [clj-ldap.client :as ldap]
             [fs.core :as fs])
-  (:import [org.apache.directory.server.core
-            DefaultDirectoryService
-            DirectoryService])
-  (:import [org.apache.directory.server.ldap
-            LdapServer])
-  (:import [org.apache.directory.server.ldap.handlers.extended
-            StartTlsHandler])
-  (:import [org.apache.directory.server.protocol.shared.transport
-            TcpTransport])
-  (:import [java.util HashSet])
-  (:import [org.apache.directory.server.core.partition.impl.btree.jdbm
-            JdbmPartition
-            JdbmIndex]))
+  (:import (java.util HashSet)
+           (org.apache.directory.server.constants ServerDNConstants)
+           (org.apache.directory.server.core DefaultDirectoryService)
+           (org.apache.directory.server.core.partition.impl.btree.jdbm JdbmIndex JdbmPartition)
+           (org.apache.directory.server.core.partition.ldif LdifPartition)
+           (org.apache.directory.server.ldap LdapServer)
+           (org.apache.directory.server.protocol.shared.transport TcpTransport)
+           (org.apache.directory.shared.ldap.schema.ldif.extractor.impl DefaultSchemaLdifExtractor)
+           (org.apache.directory.shared.ldap.schema.loader.ldif LdifSchemaLoader)
+           (org.apache.directory.shared.ldap.schema.manager.impl DefaultSchemaManager)))
 
 (defonce server (atom nil))
 
-(defn- add-partition! 
+(defn- add-partition!
   "Adds a partition to the embedded directory service"
   [service id dn]
   (let [partition (doto (JdbmPartition.)
                     (.setId id)
+                    (.setPartitionDir (fs/file (.getWorkingDirectory service) id))
                     (.setSuffix dn))]
     (.addPartition service partition)
     partition))
@@ -35,22 +33,34 @@
       (.add indexed-attrs (JdbmIndex. attr)))
     (.setIndexedAttributes partition indexed-attrs)))
 
-(defn- start-ldap-server
-  "Start up an embedded ldap server"
-  [port ssl-port]
+(defn start-ldap-server
+  "Start an embedded ldap server"
+  [port]
   (let [work-dir (fs/temp-dir)
+        schema-dir (fs/file work-dir "schema")
+        _ (fs/mkdir schema-dir)
+        ;; Setup steps based on http://svn.apache.org/repos/asf/directory/documentation/samples/trunk/embedded-sample/src/main/java/org/apache/directory/seserver/EmbeddedADSVer157.java
         directory-service (doto (DefaultDirectoryService.)
                             (.setShutdownHookEnabled true)
                             (.setWorkingDirectory work-dir))
+        schema-partition (.. directory-service (getSchemaService) (getSchemaPartition))
+        ldif-partition (doto (LdifPartition.)
+                        (.setWorkingDirectory (str schema-dir)))
+        extractor (doto (DefaultSchemaLdifExtractor. work-dir)
+                    (.extractOrCopy true))
+        _ (.setWrappedPartition schema-partition ldif-partition)
+        schema-manager (DefaultSchemaManager. (LdifSchemaLoader. schema-dir))
+        _ (.setSchemaManager directory-service schema-manager)
+        _ (.loadAllEnabled schema-manager)
+        _ (.setSchemaManager schema-partition schema-manager)
         ldap-transport (TcpTransport. port)
-        ssl-transport (doto (TcpTransport. ssl-port)
-                        (.setEnableSSL true))
         ldap-server (doto (LdapServer.)
                       (.setDirectoryService directory-service)
                       (.setAllowAnonymousAccess true)
-                      (.addExtendedOperationHandler (StartTlsHandler.))
                       (.setTransports
-                       (into-array [ldap-transport ssl-transport])))]
+                        (into-array [ldap-transport])))]
+    (->> (add-partition! directory-service "system" (ServerDNConstants/SYSTEM_DN))
+         (.setSystemPartition directory-service))
     (-> (add-partition! directory-service
                         "clojure" "dc=alienscience,dc=org,dc=uk")
         (add-index! "objectClass" "ou" "uid"))
@@ -85,8 +95,8 @@
 
 (defn start!
   "Starts an embedded ldap server on the given port"
-  [port ssl-port]
+  [port]
   (stop!)
-  (reset! server (start-ldap-server port ssl-port))
+  (reset! server (start-ldap-server port))
   (let [conn (ldap/connect {:host {:address "localhost" :port port}})]
     (add-toplevel-objects! conn)))

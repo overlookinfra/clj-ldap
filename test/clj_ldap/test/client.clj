@@ -2,13 +2,11 @@
   "Automated tests for clj-ldap"
   (:require [clj-ldap.client :as ldap])
   (:require [clj-ldap.test.server :as server])
-  (:use clojure.test)
-  (:import [com.unboundid.ldap.sdk LDAPException]))
+  (:use clojure.test))
 
 
 ;; Tests are run over a variety of connection types
 (def port* 1389)
-(def ssl-port* 1636)
 (def ^:dynamic *connections* nil)
 (def ^:dynamic *conn* nil)
 
@@ -54,34 +52,24 @@
 (defn- connect-to-server
   "Opens a sequence of connection pools on the localhost server with the
    given ports"
-  [port ssl-port]
+  [port]
   [
    (ldap/connect {:host {:port port}})
    (ldap/connect {:host {:address "localhost"
                          :port port}
                   :num-connections 4})
    (ldap/connect {:host (str "localhost:" port)})
-   (ldap/connect {:ssl? true
-                  :host {:port ssl-port}})
-   (ldap/connect {:start-tls? true
-                  :host {:port port}})
    (ldap/connect {:host {:port port}
                   :connect-timeout 1000
-                  :timeout 5000})
-   (ldap/connect {:host [(str "localhost:" port)
-                         {:port ssl-port}]})
-   (ldap/connect {:host [(str "localhost:" ssl-port)
-                         {:port ssl-port}]
-                  :ssl? true
-                  :num-connections 5})])
+                  :timeout 5000})])
 
 
 
 (defn- test-server
   "Setup server"
   [f]
-  (server/start! port* ssl-port*)
-  (binding [*connections* (connect-to-server port* ssl-port*)]
+  (server/start! port*)
+  (binding [*connections* (connect-to-server port*)]
     (f))
   (server/stop!))
 
