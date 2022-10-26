@@ -6,11 +6,12 @@
   :source-paths ["src/clojure"]
   :java-source-paths ["src/java"]
   :profiles {:dev {:dependencies [[jline "0.9.94"]
-                                  [org.apache.directory.server/apacheds-all "1.5.5"]
+                                  [org.apache.directory.server/apacheds-all "1.5.7"
+                                   ;; This dependency causes the classpath to contain two copies of the schema,
+                                   ;; which prevents the test Directory Service from starting
+                                   :exclusions [org.apache.directory.shared/shared-ldap-schema]]
                                   [fs "1.1.2"]
-                                  [org.slf4j/slf4j-simple "1.5.6"]]
-                   :jvm-opts ["-Djava.security.properties=./dev-resources/java.security"]}}
-
+                                  [org.slf4j/slf4j-simple "1.5.6"]]}}
 
   :deploy-repositories [["releases" {:url "https://clojars.org/repo"
                                      :username :env/clojars_jenkins_username
