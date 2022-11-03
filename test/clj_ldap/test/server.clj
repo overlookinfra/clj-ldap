@@ -15,6 +15,15 @@
 
 (defonce server (atom nil))
 
+(defn- override-java-version!
+  "Override the java.version property as the ancient version of
+  directory-server we use for tests seems not to understand the concept of a
+  version number with multiple digits (ie. 11 or 14). This version isn't
+  actually used anywhere, just parsed as a side effect of loading a SystemUtils
+  class, so it only needs to appear valid."
+  []
+  (System/setProperty "java.version" "0.0.0"))
+
 (defn- add-partition!
   "Adds a partition to the embedded directory service"
   [service id dn]
@@ -36,6 +45,7 @@
 (defn start-ldap-server
   "Start an embedded ldap server"
   [port]
+  (override-java-version!)
   (let [work-dir (fs/temp-dir)
         schema-dir (fs/file work-dir "schema")
         _ (fs/mkdir schema-dir)
