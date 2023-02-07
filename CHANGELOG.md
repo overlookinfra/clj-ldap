@@ -1,3 +1,6 @@
+### 0.4.0
+  * update unboundid to 6.0.7
+
 ### 0.3.0
   * add trust-managers as an accepted option to connect
   * update clojure dependency to 1.10.1
