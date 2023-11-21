@@ -1,3 +1,7 @@
+### unreleased
+  * add optional cipher suite as an accepted option to connect
+  * update unboundid to 6.0.10
+
 ### 0.4.0
   * update unboundid to 6.0.7
 

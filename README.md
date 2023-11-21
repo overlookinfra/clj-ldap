@@ -41,6 +41,11 @@ Options is a map with the following entries:
     :password        The password to bind with, optional
     :num-connections The number of connections in the pool, defaults to 1
     :ssl?            Boolean, connect over SSL (ldaps), defaults to false
+    :cipher-suites   An optional set of strings corresponding to SSL
+                     cipher suites, defaults to nil
+    :ssl-protocols   An optional set of strings corresponding to SSL
+                     protocols. `TLSv1.3`, `TLSv1.2`, `TLSv1.1`, & `TLSv1` are
+                     supported options, defaults to nil
     :start-tls?      Boolean, use startTLS to initiate TLS on an otherwise
                      unsecured connection, defaults to false.
     :trust-store     Only trust SSL certificates that are in this

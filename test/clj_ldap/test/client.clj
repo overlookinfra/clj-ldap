@@ -101,6 +101,13 @@
           :cn (-> person-a* :object :cn)
           :sn (-> person-a* :object :sn)})))
 
+(deftest test-ssl-protocol-mapping
+  (let [valid-list   (list "TLSv1.2" "TLSv1.3")
+        invalid-list (list "TLSv1.2" "TLSv1.3" "TaylorvSwift")
+        valid-constants (list "SSL_PROTOCOL_TLS_1_2" "SSL_PROTOCOL_TLS_1_3")]
+    (is (= valid-constants (ldap/ssl-protocol-mapping valid-list)))
+    (is (= valid-constants (ldap/ssl-protocol-mapping invalid-list)))))
+
 (deftest test-add-delete
   (is (= (ldap/add *conn* (:dn person-c*) (:object person-c*))
          success*))

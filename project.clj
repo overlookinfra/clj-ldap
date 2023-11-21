@@ -1,8 +1,12 @@
 (defproject puppetlabs/clj-ldap "0.4.1-SNAPSHOT"
   :description "Clojure ldap client (Puppet Labs's fork)."
   :url "https://github.com/puppetlabs/clj-ldap"
-  :dependencies [[org.clojure/clojure "1.10.1"]
-                 [com.unboundid/unboundid-ldapsdk "6.0.7"]]
+  :dependencies [[org.clojure/clojure]
+                 [com.unboundid/unboundid-ldapsdk "6.0.10"]
+                 [org.clojure/tools.logging]]
+  :parent-project {:coords [puppetlabs/clj-parent "7.2.7"]
+                   :inherit [:managed-dependencies]} 
+  :plugins  [[lein-parent "0.3.7"]]
   :source-paths ["src/clojure"]
   :java-source-paths ["src/java"]
   :profiles {:dev {:dependencies [[jline "0.9.94"]
