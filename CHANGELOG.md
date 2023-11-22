@@ -1,3 +1,9 @@
+### unreleased
+  * update unbound dependency to latest compatible version
+  * update slf4j-simple to latest version
+  * add in clj-kondo, and eastwood as code-quality linters
+  * addresses clj-kondo and eastwood identified issues
+
 ### 0.4.0
   * update unboundid to 6.0.7
 
