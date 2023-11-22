@@ -1,9 +1,8 @@
 (ns clj-ldap.test.client
   "Automated tests for clj-ldap"
-  (:require [clj-ldap.client :as ldap])
-  (:require [clj-ldap.test.server :as server])
-  (:use clojure.test))
-
+  (:require [clj-ldap.client :as ldap]
+            [clj-ldap.test.server :as server]
+            [clojure.test :refer :all]))
 
 ;; Tests are run over a variety of connection types
 (def port* 1389)
@@ -81,12 +80,12 @@
       (try
         (ldap/add *conn* (:dn person-a*) (:object person-a*))
         (ldap/add *conn* (:dn person-b*) (:object person-b*))
-        (catch Exception e))
+        (catch Exception _e))
       (f)
       (try
         (ldap/delete *conn* (:dn person-a*))
         (ldap/delete *conn* (:dn person-b*))
-        (catch Exception e)))))
+        (catch Exception _e)))))
 
 (use-fixtures :each test-data)
 (use-fixtures :once test-server)

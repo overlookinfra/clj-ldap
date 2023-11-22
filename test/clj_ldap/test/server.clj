@@ -1,10 +1,12 @@
 (ns clj-ldap.test.server
   "An embedded ldap server for unit testing"
-  (:require [clj-ldap.client :as ldap]
-            [fs.core :as fs])
-  (:import (java.util HashSet)
+  (:require [clj-ldap.client :as ldap])
+  (:import (java.io File)
+           (java.nio.file Files)
+           (java.nio.file.attribute FileAttribute)
+           (java.util HashSet)
            (org.apache.directory.server.constants ServerDNConstants)
-           (org.apache.directory.server.core DefaultDirectoryService)
+           (org.apache.directory.server.core DefaultDirectoryService DirectoryService)
            (org.apache.directory.server.core.partition.impl.btree.jdbm JdbmIndex JdbmPartition)
            (org.apache.directory.server.core.partition.ldif LdifPartition)
            (org.apache.directory.server.ldap LdapServer)
@@ -26,17 +28,17 @@
 
 (defn- add-partition!
   "Adds a partition to the embedded directory service"
-  [service id dn]
+  [^DirectoryService service ^String id dn]
   (let [partition (doto (JdbmPartition.)
                     (.setId id)
-                    (.setPartitionDir (fs/file (.getWorkingDirectory service) id))
+                    (.setPartitionDir (File. (.getWorkingDirectory service) id))
                     (.setSuffix dn))]
     (.addPartition service partition)
     partition))
 
 (defn- add-index!
   "Adds an index to the given partition on the given attributes"
-  [partition & attrs]
+  [^JdbmPartition partition & attrs]
   (let [indexed-attrs (HashSet.)]
     (doseq [attr attrs]
       (.add indexed-attrs (JdbmIndex. attr)))
@@ -46,20 +48,21 @@
   "Start an embedded ldap server"
   [port]
   (override-java-version!)
-  (let [work-dir (fs/temp-dir)
-        schema-dir (fs/file work-dir "schema")
-        _ (fs/mkdir schema-dir)
+  (let [work-dir (Files/createTempDirectory "ldap" (into-array FileAttribute []))
+        _ (.deleteOnExit (.toFile work-dir))
+        schema-dir (.resolve work-dir "schema")
+        _ (Files/createDirectory schema-dir (into-array FileAttribute []))
         ;; Setup steps based on http://svn.apache.org/repos/asf/directory/documentation/samples/trunk/embedded-sample/src/main/java/org/apache/directory/seserver/EmbeddedADSVer157.java
-        directory-service (doto (DefaultDirectoryService.)
-                            (.setShutdownHookEnabled true)
-                            (.setWorkingDirectory work-dir))
-        schema-partition (.. directory-service (getSchemaService) (getSchemaPartition))
+        ^DirectoryService directory-service (doto (DefaultDirectoryService.)
+                                              (.setShutdownHookEnabled true)
+                                              (.setWorkingDirectory (.toFile work-dir)))
+        schema-partition (.getSchemaPartition (.getSchemaService directory-service))
         ldif-partition (doto (LdifPartition.)
-                        (.setWorkingDirectory (str schema-dir)))
-        extractor (doto (DefaultSchemaLdifExtractor. work-dir)
-                    (.extractOrCopy true))
+                        (.setWorkingDirectory (.toString schema-dir)))
+        _extractor (doto (DefaultSchemaLdifExtractor. (.toFile work-dir))
+                     (.extractOrCopy true))
         _ (.setWrappedPartition schema-partition ldif-partition)
-        schema-manager (DefaultSchemaManager. (LdifSchemaLoader. schema-dir))
+        schema-manager (DefaultSchemaManager. (LdifSchemaLoader. (.toFile schema-dir)))
         _ (.setSchemaManager directory-service schema-manager)
         _ (.loadAllEnabled schema-manager)
         _ (.setSchemaManager schema-partition schema-manager)
@@ -97,11 +100,13 @@
 (defn stop!
   "Stops the embedded ldap server"
   []
-  (if @server
-    (let [[directory-service ldap-server] @server]
-      (reset! server nil)
-      (.stop ldap-server)
-      (.shutdown directory-service))))
+  (when @server
+    (try
+      (let [[^DirectoryService directory-service ldap-server] @server]
+        (reset! server nil)
+        (.stop ^LdapServer ldap-server)
+        (.shutdown directory-service))
+      (catch Exception _e))))
 
 (defn start!
   "Starts an embedded ldap server on the given port"
