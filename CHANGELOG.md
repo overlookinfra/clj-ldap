@@ -1,4 +1,4 @@
-### unreleased
+### 0.5.0
   * update unbound dependency to latest compatible version
   * update slf4j-simple to latest version
   * add in clj-kondo, and eastwood as code-quality linters
