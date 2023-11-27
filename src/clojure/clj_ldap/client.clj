@@ -1,47 +1,48 @@
 (ns clj-ldap.client
   "LDAP client"
   (:refer-clojure :exclude [get])
-  (:require [clojure.string :as string] 
+  (:require [clojure.string :as string]
             [clojure.tools.logging :as log])
-  (:import [com.unboundid.ldap.sdk
-            LDAPConnectionOptions
-            LDAPConnection
-            ResultCode
-            LDAPConnectionPool
-            LDAPException
-            Attribute
-            Entry
-            ModificationType
-            ModifyRequest
-            ModifyDNRequest
-            Modification
-            DeleteRequest
-            SimpleBindRequest
-            RoundRobinServerSet
-            SearchRequest
-            LDAPEntrySource
-            EntrySourceException
-            SearchScope])
-  (:import [com.unboundid.ldap.sdk.extensions
-            PasswordModifyExtendedRequest
-            StartTLSExtendedRequest])
-  (:import [com.unboundid.ldap.sdk.controls
-            PreReadRequestControl
-            PostReadRequestControl
-            PreReadResponseControl
-            PostReadResponseControl
-            SimplePagedResultsControl])
-  (:import [com.unboundid.util.ssl
-            SSLUtil
-            TrustAllTrustManager
-            HostNameSSLSocketVerifier])
-  (:import [com.puppetlabs.ldap Utils]))
+  (:import (com.unboundid.asn1 ASN1OctetString)
+           (com.unboundid.ldap.sdk
+             BindRequest Control LDAPConnectionOptions
+             LDAPConnection
+             LDAPResult ReadOnlyEntry ResultCode
+             LDAPConnectionPool
+             LDAPException
+             Attribute
+             Entry
+             ModificationType
+             ModifyRequest
+             ModifyDNRequest
+             Modification
+             DeleteRequest
+             SimpleBindRequest
+             RoundRobinServerSet
+             SearchRequest
+             LDAPEntrySource
+             EntrySourceException
+             SearchScope UpdatableLDAPRequest)
+           (com.unboundid.ldap.sdk.extensions
+             PasswordModifyExtendedRequest
+             StartTLSExtendedRequest)
+           (com.unboundid.ldap.sdk.controls
+             PreReadRequestControl
+             PostReadRequestControl
+             PreReadResponseControl
+             PostReadResponseControl
+             SimplePagedResultsControl)
+           (com.unboundid.util.ssl
+             SSLUtil TrustAllTrustManager
+             HostNameSSLSocketVerifier)
+           (com.puppetlabs.ldap Utils)
+           (javax.net.ssl SSLSocketFactory)))
 
 ;;======== Helper functions ====================================================
 
 (def not-nil? (complement nil?))
 
-(defn encode [attr]
+(defn encode ^String [^Attribute attr]
   (.getValue attr))
 
 (defn ssl-protocol-mapping
@@ -50,19 +51,19 @@
   (let [valid-protocols #{"TLSv1.3" "TLSv1.2" "TLSv1.1" "TLSv1"}
         valid-ssl-protocols (filter #(contains? valid-protocols %) ssl-protocols)
         invalid-ssl-protocols (remove #(contains? valid-protocols %) ssl-protocols)]
-    (when not-nil? invalid-ssl-protocols
+    (when (not-nil? invalid-ssl-protocols)
       (log/infof "Unsuported value %s passed into SSL protocol" invalid-ssl-protocols)
       (log/infof "Removing %s from ssl-protocol" invalid-ssl-protocols))
     (replace 
-     {"TLSv1.3" "SSL_PROTOCOL_TLS_1_3" 
-      "TLSv1.2" "SSL_PROTOCOL_TLS_1_2",
-      "TLSv1.1" "SSL_PROTOCOL_TLS_1_1",
-      "TLSv1" "SSL_PROTOCOL_TLS_1"} valid-ssl-protocols)))
+     {"TLSv1.3" SSLUtil/SSL_PROTOCOL_TLS_1_3 
+      "TLSv1.2" SSLUtil/SSL_PROTOCOL_TLS_1_2 
+      "TLSv1.1" SSLUtil/SSL_PROTOCOL_TLS_1_1, 
+      "TLSv1" SSLUtil/SSL_PROTOCOL_TLS_1} valid-ssl-protocols)))
 
 (defn- extract-attribute
   "Extracts [:name value] from the given attribute object. Converts
    the objectClass attribute to a set."
-  [attr]
+  [^Attribute attr]
   (let [k (keyword (.getName attr))]
     (cond
       (= :objectClass k)     [k (set (vec (.getValues attr)))]
@@ -71,9 +72,9 @@
 
 (defn- entry-as-map
   "Converts an Entry object into a map optionally adding the DN"
-  ([entry]
+  ([^ReadOnlyEntry entry]
    (entry-as-map entry true))
-  ([entry dn?]
+  ([^ReadOnlyEntry entry dn?]
    (let [attrs (seq (.getAttributes entry))]
        (if dn?
          (apply hash-map :dn (.getDN entry)
@@ -86,9 +87,9 @@
   [m control]
   (condp instance? control
     PreReadResponseControl
-    (update-in m [:pre-read] merge (entry-as-map (.getEntry control) false))
+    (update-in m [:pre-read] merge (entry-as-map (.getEntry ^PreReadResponseControl control) false))
     PostReadResponseControl
-    (update-in m [:post-read] merge (entry-as-map (.getEntry control) false))
+    (update-in m [:post-read] merge (entry-as-map (.getEntry ^PostReadResponseControl control) false))
     m))
 
 (defn- add-response-controls
@@ -98,7 +99,7 @@
 
 (defn- ldap-result
   "Converts an LDAPResult object into a map"
-  [obj]
+  [^LDAPResult obj]
   (let [res (.getResultCode obj)
         controls (.getResponseControls obj)]
     (add-response-controls
@@ -108,7 +109,7 @@
 
 (defn- connection-options
   "Returns a LDAPConnectionOptions object"
-  [{:keys [connect-timeout timeout verify-host? wildcard-host?]}]
+  ^LDAPConnectionOptions [{:keys [connect-timeout timeout verify-host? wildcard-host?]}]
   (let [opt (LDAPConnectionOptions.)]
     (when connect-timeout      (.setConnectTimeoutMillis opt connect-timeout))
     (when timeout              (.setResponseTimeoutMillis opt timeout))
@@ -129,12 +130,12 @@
 
 (defn- create-ssl-factory
   "Returns a SSLSocketFactory object"
-  [{:keys [trust-managers trust-store cipher-suites ssl-protocols]}]
-  (let [ssl-util (create-ssl-util trust-managers trust-store)] 
+  ^SSLSocketFactory [{:keys [trust-managers trust-store cipher-suites ssl-protocols]}]
+  (let [^SSLUtil ssl-util (create-ssl-util trust-managers trust-store)] 
     (when (not-nil? cipher-suites)
-      (.setEnabledCipherSuites cipher-suites))
+      (SSLUtil/setEnabledSSLCipherSuites cipher-suites))
     (when (not-nil? ssl-protocols) 
-      (.setEnabledProtocols (ssl-protocol-mapping ssl-protocols)))
+      (SSLUtil/setEnabledSSLProtocols (ssl-protocol-mapping ssl-protocols)))
     (.createSSLSocketFactory ssl-util)))
 
 (defn- host-as-map
@@ -147,8 +148,10 @@
                        {:address (if (= address "")
                                    "localhost"
                                    address)
-                        :port (if port
-                                (int (Integer. port)))})
+                        :port (when port
+                                (if (string? port)
+                                  (int (Integer/parseInt port))
+                                  port))})
     (map? host)      (merge {:address "localhost"} host)
     :else            (throw
                       (IllegalArgumentException.
@@ -157,36 +160,38 @@
 
 (defn- create-connection
   "Create an LDAPConnection object"
-  [{:keys [host ssl? start-tls?] :as options}]
+  ^LDAPConnection [{:keys [host ssl? start-tls?] :as options}]
   (let [h (host-as-map host)
-        opt (connection-options options)
-        default-port 389]
+        ^LDAPConnectionOptions opt (connection-options options)
+        ^String address (:address h)
+        ^int effective-port (or (:port h) 389)
+        ^int effective-ssl-port (or (:port h) 636)]
     (cond
       (and ssl? start-tls?)
       (throw (IllegalArgumentException. "Can't have both SSL and startTLS"))
 
       ssl?
-      (LDAPConnection. (create-ssl-factory options) opt (:address h) (or (:port h) 636))
+      (LDAPConnection. ^SSLSocketFactory (create-ssl-factory options) opt address effective-ssl-port)
 
       start-tls?
       (let [start-tls-req (StartTLSExtendedRequest. (create-ssl-factory options))]
-        (doto (LDAPConnection. opt (:address h) (or (:port h) default-port))
+        (doto (LDAPConnection. opt address effective-port)
           (.processExtendedOperation start-tls-req)))
 
       :else
-      (LDAPConnection. opt (:address h) (or (:port h) default-port)))))
+      (LDAPConnection. opt address effective-port))))
 
 (defn- bind-request
   "Returns a BindRequest object"
-  [{:keys [bind-dn password]}]
+  ^BindRequest [{:keys [bind-dn password]}]
   (if bind-dn
-    (SimpleBindRequest. bind-dn password)
+    (SimpleBindRequest. ^String bind-dn ^String password)
     (SimpleBindRequest.)))
 
 (defn- connect-to-host
   "Connect to a single host"
   [options]
-  (let [{:keys [num-connections cipher-suites ssl-protocols]} options
+  (let [{:keys [num-connections]} options
         connection (create-connection options)
         bind-result (.bind connection (bind-request options))]
     (if (= ResultCode/SUCCESS (.getResultCode bind-result))
@@ -195,33 +200,34 @@
 
 (defn- create-server-set
   "Returns a RoundRobinServerSet"
-  [{:keys [host ssl?] :as options}]
+  ^RoundRobinServerSet [{:keys [host ssl?] :as options}]
   (let [hosts (map host-as-map host)
-        addresses (into-array (map :address hosts))
-        opt (connection-options options)]
+        ^"[Ljava.lang.String;" addresses (into-array String (map :address hosts))
+        ^LDAPConnectionOptions opt (connection-options options)]
     (if ssl?
       (let [ssl (create-ssl-factory options)
-            ports (int-array (map #(or (:port %) (int 636)) hosts))]
+            ^"[I" ports (int-array (map #(or (:port %) (int 636)) hosts))]
         (RoundRobinServerSet. addresses ports ssl opt))
-      (let [ports (int-array (map #(or (:port %) (int 389)) hosts))]
+      (let [^"[I" ports (int-array (map #(or (:port %) (int 389)) hosts))]
         (RoundRobinServerSet. addresses ports opt)))))
 
 (defn- connect-to-hosts
   "Connects to multiple hosts"
   [options]
   (let [{:keys [num-connections]} options
-        server-set (create-server-set options)
-        bind-request (bind-request options)]
-    (LDAPConnectionPool. server-set bind-request (or num-connections 1))))
-
+        ^RoundRobinServerSet server-set (create-server-set options)
+        ^BindRequest bind-request (bind-request options)
+        ^int connections (or num-connections 1)]
+    (LDAPConnectionPool. server-set bind-request connections)))
 
 (defn- set-entry-kv!
   "Sets the given key/value pair in the given entry object"
-  [entry-obj k v]
+  [^Entry entry-obj k v]
   (let [name-str (name k)]
     (.addAttribute entry-obj
                    (if (coll? v)
-                     (Attribute. name-str (into-array v))
+                     (let [^"[Ljava.lang.String;" values (into-array String v)]
+                       (Attribute. name-str values))
                      (Attribute. name-str (str v))))))
 
 (defn- set-entry-map!
@@ -232,50 +238,55 @@
 
 (defn- create-modification
   "Creates a modification object"
-  [modify-op attribute values]
+  [^ModificationType modify-op ^String attribute values]
   (cond
-    (coll? values)    (Modification. modify-op attribute (into-array values))
-    (bytes? values)   (Modification. modify-op attribute values)
+    (coll? values)    (if (string? (first values))
+                        (let [^"[Ljava.lang.String;" string-values (into-array String values)]
+                           (Modification. modify-op attribute string-values))
+                        (let [^"[Lcom.unboundid.asn1.ASN1OctetString;" octet-values (into-array ASN1OctetString values)]
+                          (Modification. modify-op attribute octet-values)))
+    (bytes? values)   (Modification. modify-op attribute ^"[B" values)
     (= :all values)   (Modification. modify-op attribute)
     :else             (Modification. modify-op attribute (str values))))
 
 (defn- modify-ops
   "Returns a sequence of Modification objects to do the given operation
    using the contents of the given map."
-  [modify-op modify-map]
+  [^ModificationType modify-op modify-map]
   (for [[k v] modify-map]
     (create-modification modify-op (name k) v)))
 
 (defn- add-request-controls
-  [request options]
   "Adds LDAP controls to the given request"
+  [^UpdatableLDAPRequest request options]
   (when (contains? options :pre-read)
     (let [attributes (map name (options :pre-read))
-          pre-read-control (PreReadRequestControl. (into-array attributes))]
+          pre-read-control (PreReadRequestControl. ^"[Ljava.lang.String;" (into-array String attributes))]
       (.addControl request pre-read-control)))
   (when (contains? options :post-read)
     (let [attributes (map name (options :post-read))
-          pre-read-control (PostReadRequestControl. (into-array attributes))]
+          pre-read-control (PostReadRequestControl. ^"[Ljava.lang.String;" (into-array String attributes))]
       (.addControl request pre-read-control))))
 
 
 (defn- get-modify-request
   "Sets up a ModifyRequest object using the contents of the given map"
-  [dn modifications]
+  ^ModifyRequest [^String dn modifications]
   (let [adds (modify-ops ModificationType/ADD (modifications :add))
         deletes (modify-ops ModificationType/DELETE (modifications :delete))
         replacements (modify-ops ModificationType/REPLACE
                                  (modifications :replace))
         increments (modify-ops ModificationType/INCREMENT
                                (modifications :increment))
-        all (concat adds deletes replacements increments)]
-    (doto (ModifyRequest. dn (into-array all))
+        all (concat adds deletes replacements increments)
+        ^"[Lcom.unboundid.ldap.sdk.Modification;" as-array (into-array Modification all)]
+    (doto (ModifyRequest. dn as-array)
       (add-request-controls modifications))))
 
 (defn- entry-seq
   "Returns a lazy sequence of entries from an LDAPEntrySource object"
-  [source]
-  (if-let [n (.nextEntry source)]
+  [^LDAPEntrySource source]
+  (when-let [n (.nextEntry source)]
     (cons n (lazy-seq (entry-seq source)))))
 
 ;; Extended version of search-results function using a
@@ -285,14 +296,17 @@
 (defn- search-all-results
   "Returns a sequence of search results via paging so we don't run into
    size limits with the number of results."
-  [connection {:keys [base scope filter attributes]}]
+  [^LDAPConnectionPool connection criteria]
   (let [sizeLimit 500
-        timeLimit 60
-        cookie nil
-        req (SearchRequest. base scope filter attributes)]
+        ^String base (:base criteria)
+        ^SearchScope scope (:scope criteria)
+        ^String filter (:filter criteria)
+        ^"[Ljava.lang.String;" attributes (:attributes criteria)
+        ^SearchRequest req (SearchRequest. base scope filter attributes)]
     (loop [results []
            cookie nil]
-      (.setControls req (list (SimplePagedResultsControl. sizeLimit cookie)))
+      (let [^"[Lcom.unboundid.ldap.sdk.Control;" page-results-array (make-array Control (SimplePagedResultsControl. sizeLimit cookie))]
+        (.setControls req page-results-array))
       (let [res (.search connection req)
             control (SimplePagedResultsControl/get res)
             newres (->> (.getSearchEntries res)
@@ -307,17 +321,25 @@
 
 (defn- search-results
   "Returns a sequence of search results for the given search criteria."
-  [connection {:keys [base scope filter attributes]}]
-  (let [res (.search connection base scope filter attributes)]
-    (if (> (.getEntryCount res) 0)
+  [^LDAPConnectionPool connection criteria]
+  (let [^String base (:base criteria)
+        ^SearchScope scope (:scope criteria)
+        ^String filter (:filter criteria)
+        ^"[Ljava.lang.String;" attributes (:attributes criteria)
+        res (.search connection base scope filter attributes)]
+    (when (> (.getEntryCount res) 0)
       (remove empty?
               (map entry-as-map (.getSearchEntries res))))))
 
 (defn- search-results!
   "Call the given function with the results of the search using
    the given search criteria"
-  [pool {:keys [base scope filter attributes]} queue-size f]
-  (let [request (SearchRequest. base scope filter attributes)
+  [^LDAPConnectionPool pool criteria _queue-size f]
+  (let [^String base (:base criteria)
+        ^SearchScope scope (:scope criteria)
+        ^String filter (:filter criteria)
+        ^"[Ljava.lang.String;" attributes (:attributes criteria)
+        request (SearchRequest. base scope filter attributes)
         conn (.getConnection pool)]
     (try
       (with-open [source (LDAPEntrySource. conn request false)]
@@ -343,9 +365,9 @@
   [attrs]
   (cond
     (or (nil? attrs)
-        (empty? attrs))    (into-array java.lang.String
+        (empty? attrs))    (into-array String
                                        [SearchRequest/ALL_USER_ATTRIBUTES])
-    :else                  (into-array java.lang.String
+    :else                  (into-array String
                                        (map name attrs))))
 
 (defn- search-criteria
@@ -416,7 +438,7 @@ the bind attempt will have no side-effects, leaving the state of the
 underlying connections unchanged."
   [connection bind-dn password]
   (try
-    (let [bind-result (.bind connection bind-dn password)]
+    (let [bind-result (.bind ^LDAPConnectionPool connection bind-dn password)]
       (if (= ResultCode/SUCCESS (.getResultCode bind-result)) true false))
     (catch Exception _ false)))
 
@@ -427,18 +449,18 @@ underlying connections unchanged."
    from the server."
   ([connection dn]
    (get connection dn nil))
-  ([connection dn attributes]
-   (if-let [result (if attributes
-                       (.getEntry connection dn
-                                  (into-array java.lang.String
-                                              (map name attributes)))
-                       (.getEntry connection dn))]
+  ([^LDAPConnectionPool connection dn attributes]
+   (when-let [result (if attributes
+                         (.getEntry connection dn
+                                    (into-array String
+                                                (map name attributes)))
+                         (.getEntry connection dn))]
         (entry-as-map result))))
 
 (defn add
   "Adds an entry to the connected ldap server. The entry is assumed to be
    a map."
-  [connection dn entry]
+  [^LDAPConnectionPool connection ^String dn entry]
   (let [entry-obj (Entry. dn)]
     (set-entry-map! entry-obj entry)
     (ldap-result
@@ -468,7 +490,7 @@ Where :add adds an attribute value, :delete deletes an attribute value and
 :replace replaces the set of values for the attribute with the ones specified.
 The entries :pre-read and :post-read specify attributes that have be read and
 returned either before or after the modifications have taken place."
-  [connection dn modifications]
+  [^LDAPConnectionPool connection dn modifications]
   (let [modify-obj (get-modify-request dn modifications)]
     (ldap-result
      (.modify connection modify-obj))))
@@ -477,15 +499,15 @@ returned either before or after the modifications have taken place."
   "Creates a new password modify extended request that will attempt to change
    the password of the currently-authenticated user, or another user if their
    DN is provided and the caller has the required authorisation."
-  ([connection new]
+  ([^LDAPConnectionPool connection ^String new]
    (let [request (PasswordModifyExtendedRequest. new)]
       (.processExtendedOperation connection request)))
 
-  ([connection old new]
+  ([^LDAPConnectionPool connection ^String old ^String new]
    (let [request (PasswordModifyExtendedRequest. old new)]
       (.processExtendedOperation connection request)))
 
-  ([connection old new dn]
+  ([^LDAPConnectionPool connection ^String old ^String new ^String dn]
    (let [request (PasswordModifyExtendedRequest. dn old new)]
       (.processExtendedOperation connection request))))
 
@@ -496,7 +518,7 @@ returned either before or after the modifications have taken place."
   The new-rdn has the form cn=foo or ou=foo. Using just foo is not sufficient.
   The delete-old-rdn boolean option indicates whether to delete the current
   RDN value from the target entry."
-  [connection dn new-rdn delete-old-rdn]
+  [^LDAPConnectionPool connection ^String dn ^String new-rdn ^Boolean delete-old-rdn]
   (let [request (ModifyDNRequest. dn new-rdn delete-old-rdn)]
     (ldap-result
       (.modifyDN connection request))))
@@ -505,9 +527,9 @@ returned either before or after the modifications have taken place."
   "Deletes the given entry in the connected ldap server. Optionally takes
    a map that can contain the entry :pre-read to indicate the attributes
    that should be read before deletion."
-  ([connection dn]
+  ([^LDAPConnectionPool connection ^String dn]
    (delete connection dn nil))
-  ([connection dn options]
+  ([^LDAPConnectionPool connection ^String dn options]
    (let [delete-obj (DeleteRequest. dn)]
        (when options
          (add-request-controls delete-obj options))

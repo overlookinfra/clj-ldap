@@ -1,9 +1,9 @@
 (ns clj-ldap.test.client
   "Automated tests for clj-ldap"
-  (:require [clj-ldap.client :as ldap])
-  (:require [clj-ldap.test.server :as server])
-  (:use clojure.test))
-
+  (:require [clj-ldap.client :as ldap]
+            [clj-ldap.test.server :as server]
+            [clojure.test :refer :all])
+    (:import (com.unboundid.util.ssl SSLUtil)))
 
 ;; Tests are run over a variety of connection types
 (def port* 1389)
@@ -81,12 +81,12 @@
       (try
         (ldap/add *conn* (:dn person-a*) (:object person-a*))
         (ldap/add *conn* (:dn person-b*) (:object person-b*))
-        (catch Exception e))
+        (catch Exception _e))
       (f)
       (try
         (ldap/delete *conn* (:dn person-a*))
         (ldap/delete *conn* (:dn person-b*))
-        (catch Exception e)))))
+        (catch Exception _e)))))
 
 (use-fixtures :each test-data)
 (use-fixtures :once test-server)
@@ -104,7 +104,7 @@
 (deftest test-ssl-protocol-mapping
   (let [valid-list   (list "TLSv1.2" "TLSv1.3")
         invalid-list (list "TLSv1.2" "TLSv1.3" "TaylorvSwift")
-        valid-constants (list "SSL_PROTOCOL_TLS_1_2" "SSL_PROTOCOL_TLS_1_3")]
+        valid-constants (list SSLUtil/SSL_PROTOCOL_TLS_1_2 SSLUtil/SSL_PROTOCOL_TLS_1_3)]
     (is (= valid-constants (ldap/ssl-protocol-mapping valid-list)))
     (is (= valid-constants (ldap/ssl-protocol-mapping invalid-list)))))
 
