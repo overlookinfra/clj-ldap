@@ -1,7 +1,8 @@
 (ns clj-ldap.client
   "LDAP client"
   (:refer-clojure :exclude [get])
-  (:require [clojure.string :as string])
+  (:require [clojure.string :as string]
+            [clojure.tools.logging :as log])
   (:import (com.unboundid.asn1 ASN1OctetString)
            (com.unboundid.ldap.sdk
              BindRequest Control LDAPConnectionOptions
@@ -43,6 +44,21 @@
 
 (defn encode ^String [^Attribute attr]
   (.getValue attr))
+
+(defn ssl-protocol-mapping
+  "Converts user protocol settings into valid string constants"
+  [ssl-protocols]
+  (let [valid-protocols #{"TLSv1.3" "TLSv1.2" "TLSv1.1" "TLSv1"}
+        valid-ssl-protocols (filter #(contains? valid-protocols %) ssl-protocols)
+        invalid-ssl-protocols (remove #(contains? valid-protocols %) ssl-protocols)]
+    (when (not-nil? invalid-ssl-protocols)
+      (log/infof "Unsuported value %s passed into SSL protocol" invalid-ssl-protocols)
+      (log/infof "Removing %s from ssl-protocol" invalid-ssl-protocols))
+    (replace 
+     {"TLSv1.3" SSLUtil/SSL_PROTOCOL_TLS_1_3 
+      "TLSv1.2" SSLUtil/SSL_PROTOCOL_TLS_1_2 
+      "TLSv1.1" SSLUtil/SSL_PROTOCOL_TLS_1_1, 
+      "TLSv1" SSLUtil/SSL_PROTOCOL_TLS_1} valid-ssl-protocols)))
 
 (defn- extract-attribute
   "Extracts [:name value] from the given attribute object. Converts
@@ -114,8 +130,12 @@
 
 (defn- create-ssl-factory
   "Returns a SSLSocketFactory object"
-  ^SSLSocketFactory [{:keys [trust-managers trust-store]}]
-  (let [^SSLUtil ssl-util (create-ssl-util trust-managers trust-store)]
+  ^SSLSocketFactory [{:keys [trust-managers trust-store cipher-suites ssl-protocols]}]
+  (let [^SSLUtil ssl-util (create-ssl-util trust-managers trust-store)] 
+    (when (not-nil? cipher-suites)
+      (SSLUtil/setEnabledSSLCipherSuites cipher-suites))
+    (when (not-nil? ssl-protocols) 
+      (SSLUtil/setEnabledSSLProtocols (ssl-protocol-mapping ssl-protocols)))
     (.createSSLSocketFactory ssl-util)))
 
 (defn- host-as-map
@@ -376,6 +396,11 @@
    :password        The password to bind with, optional
    :num-connections The number of connections in the pool, defaults to 1
    :ssl?            Boolean, connect over SSL (ldaps), defaults to false
+   :cipher-suites   An optional set of strings corresponding to SSL
+                    cipher suites, defaults to nil
+   :ssl-protocols   An optional set of strings corresponding to SSL
+                    protocols. TLSv1.3, TLSv1.2, TLSv1.1, & TLSv1 are
+                    supported options, defaults to nil
    :start-tls?      Boolean, use startTLS to initiate TLS on an otherwise
                     unsecured connection, defaults to false.
    :trust-store     Only trust SSL certificates that are in this

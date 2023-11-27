@@ -1,8 +1,11 @@
 (defproject puppetlabs/clj-ldap "0.4.1-SNAPSHOT"
   :description "Clojure ldap client (Puppet Labs's fork)."
   :url "https://github.com/puppetlabs/clj-ldap"
-  :dependencies [[org.clojure/clojure "1.10.1"]
-                 [com.unboundid/unboundid-ldapsdk "6.0.10"]]
+  :dependencies [[org.clojure/clojure]
+                 [com.unboundid/unboundid-ldapsdk "6.0.10"]
+                 [org.clojure/tools.logging]]
+  :parent-project {:coords [puppetlabs/clj-parent "7.2.7"]
+                   :inherit [:managed-dependencies]} 
   :source-paths ["src/clojure"]
   :java-source-paths ["src/java"]
   :profiles {:dev {:dependencies [[org.apache.directory.server/apacheds-all "1.5.7"
@@ -15,7 +18,8 @@
                                      :username :env/clojars_jenkins_username
                                      :password :env/clojars_jenkins_password
                                      :sign-releases false}]]
-  :plugins [[jonase/eastwood "1.2.2" :exclusions [org.clojure/clojure]]]
+  :plugins [[jonase/eastwood "1.2.2" :exclusions [org.clojure/clojure]]
+            [lein-parent "0.3.7"]]
   :license {:name "Eclipse Public License - v 1.0"
             :url "http://www.eclipse.org/legal/epl-v10.html"
             :distribution :repo
